@@ -1,10 +1,3 @@
-#
-#  sequence_methods.py
-#  
-#
-#  Created by Brian Cleary on 8/19/2012.
-#  Copyright (c) 2012 Brian Cleary. All rights reserved.
-#
 from numpy import *
 from multiprocessing import Pool
 import random
