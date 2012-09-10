@@ -104,7 +104,7 @@ def bin_one_block(start_id,size,Wheels):
 		push_index(D,w)
 	return A[-1]
 
-def generator_to_bins(sequence_generator,Wheels):
+def generator_to_bins(sequence_generator,Wheels,reverse_compliments=False):
 	num_wheels = Wheels[-1]['w'] + 1
 	num_spokes = Wheels[-1]['s'] + 1
 	pow2 = [2**j for j in range(num_spokes)]
@@ -117,7 +117,12 @@ def generator_to_bins(sequence_generator,Wheels):
 	L -= [w['c'] for w in Wheels]
 	L = int_((sign(L) + 1)/2)
 	L = [dot(L[:,ws:ws+num_spokes],pow2) for ws in range(0,num_wheels*num_spokes,num_spokes)]
-	return A,L
+	# NEED TO TEST THIS
+	if reverse_compliments:
+		L2 = [dot((L[:,ws:ws+num_spokes] - 1)*-1,pow2[::-1]) for ws in range(0,num_wheels*num_spokes,num_spokes)]
+		return A,L,L2
+	else:
+		return A,L
 
 def one_wheel(args):
 	w,spokes,realm = args
