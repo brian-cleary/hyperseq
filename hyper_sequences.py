@@ -117,9 +117,11 @@ def generator_to_bins(sequence_generator,Wheels,reverse_compliments=False):
 	L -= [w['c'] for w in Wheels]
 	L = int_((sign(L) + 1)/2)
 	B = [dot(L[:,ws:ws+num_spokes],pow2) for ws in range(0,num_wheels*num_spokes,num_spokes)]
-	# NEED TO TEST THIS
 	if reverse_compliments:
-		B2 = [dot((L[:,ws:ws+num_spokes] - 1)*-1,pow2[::-1]) for ws in range(0,num_wheels*num_spokes,num_spokes)]
+		L = dot(array(C)[:,::-1]*-1,transpose([w['p'] for w in Wheels]).conjugate())
+		L -= [w['c'] for w in Wheels]
+		L = int_((sign(L) + 1)/2)
+		B2 = [dot(L[:,ws:ws+num_spokes],pow2) for ws in range(0,num_wheels*num_spokes,num_spokes)]
 		return A,B,B2
 	else:
 		return A,B
