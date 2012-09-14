@@ -1,12 +1,8 @@
 from numpy import *
 import random
 from pymongo import ASCENDING,DESCENDING,Connection
-from scipy.sparse import *
-import cPickle, zlib
+import cPickle
 from operator import itemgetter
-from collections import defaultdict
-import os
-from itertools import product
 import math
 from index_tools import push_index
 

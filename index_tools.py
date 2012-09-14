@@ -1,7 +1,6 @@
 import heapq
 import tempfile
 import array
-from struct import *
 from collections import defaultdict
 
 wheel_index_prefix = '/mnt/index_files/'
