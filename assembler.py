@@ -66,18 +66,19 @@ def sequence_terminals(s,k):
 	yield {'_id': -k-1,'s': s[-k-1:-1]}
 	yield {'_id': -k,'s': s[-k:]}
 
-def update_known_paths(Hp,P,Pb,forward=True):
+def update_known_paths(Hp,Pb,forward=True):
+	# not storing the full sequence path or bin path.
+	# will only return terminal bins to conserve memory
 	if forward:
-		for i in range(len(P)-3):
+		for i in range(len(Pb)-3):
 			if Pb[i:i+3] not in Hp:
-				Hp[Pb[i:i+3]] = (P[i+3:],Pb[i+3:])
+				Hp[Pb[i:i+3]] = Pb[-2:]
 	else:
-		for i in range(len(P),3,-1):
+		for i in range(len(Pb),3,-1):
 			if Pb[i-3:i] not in Hp:
-				Hp[Pb[i-3:i]] = (P[:i-3],Pb[:i-3])
+				H[Pb[i-3:i]] = Pb[:2]
 	return Hp
 
-# Known_Paths may occupy more memory than anything else...need to make this more efficient
 def read_many_sequences(H,W,kmer_size):
 	db = conn['test_genome']
 	Read_Terminals = defaultdict(list)
@@ -86,9 +87,9 @@ def read_many_sequences(H,W,kmer_size):
 	for doc in docs:
 		if len(doc['s']) > kmer_size:
 			f,b = read_sequence(doc['s'],H,Known_Paths,W,k=kmer_size)
-			Known_Paths = update_known_paths(Known_Paths,f[0],f[1])
-			Known_Paths = update_known_paths(Known_Paths,b[0],b[1])
-			for x in f[1][-2:] + b[1][:2]:
+			Known_Paths = update_known_paths(Known_Paths,f)
+			Known_Paths = update_known_paths(Known_Paths,b)
+			for x in f[-2:] + b[:2]:
 				Read_Terminals[x].append(doc['_id'])
 	Read_Terminals = [(len(v),k,v) for k,v in Read_Terminals.iteritems()]
 	Read_Terminals.sort(reverse=True)
@@ -123,8 +124,7 @@ def read_sequence(initial_sequence,H,Hp,W,k=None):
 			forward_extension += extension[0]
 			forward_extension_bins += extension[1]
 			if forward_extension_bins[-3:] in Hp:
-				forward_extension += Hp[forward_extension_bins[-3:]][0]
-				forward_extension_bins += Hp[forward_extension_bins[-3:]][1]
+				forward_extension_bins += Hp[forward_extension_bins[-3:]]
 				break
 		else:
 			break
@@ -135,12 +135,11 @@ def read_sequence(initial_sequence,H,Hp,W,k=None):
 			backward_extension = extension[0] + backward_extension
 			backward_extension_bins = extension[1] + backward_extension_bins
 			if backward_extension_bins[:3] in Hp:
-				backward_extension = Hp[backward_extension_bins[:3]][0] + backward_extension
-				backward_extension_bins = Hp[backward_extension_bins[:3]][1] + backward_extension_bins
+				backward_extension_bins = Hp[backward_extension_bins[:3]] + backward_extension_bins
 				break
 		else:
 			break
-	return (forward_extension,forward_extension_bins),(backward_extension,backward_extension_bins)
+	return forward_extension_bins,backward_extension_bins
 
 def extend_path(s0,H,W,fb):
 	k = len(s0)
