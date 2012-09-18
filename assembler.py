@@ -1,4 +1,4 @@
-from hyper_sequences import set_wheels,get_wheels,generator_to_bins
+from hyper_sequences import set_wheels,get_wheels,generator_to_bins,coords_to_bins,letters_to_coords
 from pymongo import Connection
 from random import randint
 import itertools
@@ -21,17 +21,27 @@ def generate_test_genome(n=10000,read_size=50,repeats=10,k=20):
 	S = ''.join([L[randint(0,3)] for _ in xrange(n)])
 	db = conn['test_genome']
 	db.kmers.drop()
+	db.reads.drop()
 	T = 0
 	for c in range(repeats):
 		i = 0
 		while i < len(S):
 			r = randint(-read_size/5,read_size/5) + read_size
 			s = S[i:i+r]
-			db.reads.insert({"_id": i,"s": s})
+			q = []
+			for _ in s:
+				r0 = randint(0,100)
+				if r0 <= 5:
+					q.append(randint(10,40))
+				elif r0 <= 20:
+					q.append(randint(31,35))
+				else:
+					q.append(34)
+			db.reads.insert({"_id": i,"s": s,"q": q})
 			i += r
 			l = 0
 			while l < len(s)-k:
-				db.kmers.insert({'_id': str(T)+s[l]+s[l+k-1],'s': s[l:l+k]})
+				db.kmers.insert({'_id': T,'s': s[l:l+k],'q': q[l:l+k]})
 				T += 1
 				l += 1
 	return S
@@ -46,49 +56,35 @@ def do_wheels(s):
 def hash_test_kmers(W):
 	db = conn['test_genome']
 	docs = db.kmers.find({},timeout=False)
-	A,B = generator_to_bins(docs,W)
+	A,B = generator_to_bins(docs,W,return_terminals=True)
 	H = defaultdict()
 	for i in xrange(len(A)):
-		H[B[0][i]] = (A[i][-2],A[i][-1])
+		H[B[0][i]] = True
 	return H
 
-def extend_kmer(s,forward=True):
-	A = ['A','T','C','G']
-	for a in A:
-		if forward:
-			yield {'_id': a,'s': s[1:] + a}
-		else:
-			yield {'_id': a,'s': a + s[:-1]}
-
-def sequence_terminals(s,k):
-	yield {'_id': k,'s': s[:k]}
-	yield {'_id': k+1,'s': s[1:k+1]}
-	yield {'_id': -k-1,'s': s[-k-1:-1]}
-	yield {'_id': -k,'s': s[-k:]}
-
-def update_known_paths(Hp,Pb,forward=True):
+def update_known_paths(Hp,Pb,pl,forward=True):
 	# not storing the full sequence path or bin path.
 	# will only return terminal bins to conserve memory
 	if forward:
-		for i in range(len(Pb)-3):
-			if Pb[i:i+3] not in Hp:
-				Hp[Pb[i:i+3]] = Pb[-2:]
+		for i in range(len(Pb)-pl):
+			if Pb[i:i+pl] not in Hp:
+				Hp[Pb[i:i+pl]] = Pb[-2:]
 	else:
-		for i in range(len(Pb),3,-1):
-			if Pb[i-3:i] not in Hp:
-				H[Pb[i-3:i]] = Pb[:2]
+		for i in range(len(Pb),pl,-1):
+			if Pb[i-pl:i] not in Hp:
+				H[Pb[i-pl:i]] = Pb[:2]
 	return Hp
 
-def read_many_sequences(H,W,kmer_size):
+def read_many_sequences(H,W,kmer_size,path_length):
 	db = conn['test_genome']
 	Read_Terminals = defaultdict(list)
 	Known_Paths = {}
 	docs = db.reads.find({},timeout=False)
 	for doc in docs:
 		if len(doc['s']) > kmer_size:
-			f,b = read_sequence(doc['s'],H,Known_Paths,W,k=kmer_size)
-			Known_Paths = update_known_paths(Known_Paths,f)
-			Known_Paths = update_known_paths(Known_Paths,b)
+			f,b = read_sequence(doc,H,Known_Paths,W,k=kmer_size,known_path_length=path_length)
+			Known_Paths = update_known_paths(Known_Paths,f,path_length)
+			Known_Paths = update_known_paths(Known_Paths,b,path_length,forward=False)
 			for x in f[-2:] + b[:2]:
 				Read_Terminals[x].append(doc['_id'])
 	Read_Terminals = [(len(v),k,v) for k,v in Read_Terminals.iteritems()]
@@ -109,12 +105,12 @@ def read_many_sequences(H,W,kmer_size):
 				Partitioned_Reads[r] = p0
 	return Partitioned_Reads
 
-# Hp = {(b0,b1,b2): ('atcg',[b,b,b,b])}
-def read_sequence(initial_sequence,H,Hp,W,k=None):
-	forward_extension = ''
-	backward_extension = ''
+def read_sequence(initial_read,H,Hp,W,k=None,known_path_length=2):
+	forward_extension = []
+	backward_extension = []
 	forward_extension_bins = ()
 	backward_extension_bins = ()
+	initial_sequence = list(letters_to_coords(initial_read))
 	if not k:
 		k = len(initial_sequence)
 	while True:
@@ -123,8 +119,8 @@ def read_sequence(initial_sequence,H,Hp,W,k=None):
 		if extension:
 			forward_extension += extension[0]
 			forward_extension_bins += extension[1]
-			if forward_extension_bins[-3:] in Hp:
-				forward_extension_bins += Hp[forward_extension_bins[-3:]]
+			if forward_extension_bins[-known_path_length:] in Hp:
+				forward_extension_bins += Hp[forward_extension_bins[-known_path_length:]]
 				break
 		else:
 			break
@@ -134,8 +130,8 @@ def read_sequence(initial_sequence,H,Hp,W,k=None):
 		if extension:
 			backward_extension = extension[0] + backward_extension
 			backward_extension_bins = extension[1] + backward_extension_bins
-			if backward_extension_bins[:3] in Hp:
-				backward_extension_bins = Hp[backward_extension_bins[:3]] + backward_extension_bins
+			if backward_extension_bins[:known_path_length] in Hp:
+				backward_extension_bins = Hp[backward_extension_bins[:known_path_length]] + backward_extension_bins
 				break
 		else:
 			break
@@ -143,12 +139,26 @@ def read_sequence(initial_sequence,H,Hp,W,k=None):
 
 def extend_path(s0,H,W,fb):
 	k = len(s0)
-	A,B = generator_to_bins(extend_kmer(s0,forward=fb),W)
+	A,C = extend_kmer(s0,forward=fb)
+	A,B = coords_to_bins(A,C,W)
 	E = []
 	for a in range(len(A)):
-		if H.get(B[0][a],(None,None))[int(fb)] == A[a]:
-			E.append((A[a],(B[0][a],)))
+		if H.get(B[0][a],False):
+			E.append(([A[a]],(B[0][a],)))
 	return E
+
+Alphabet = {'s': 'ATCG'}
+Mapped_Alphabet = letters_to_coords(Alphabet)
+def extend_kmer(s,forward=True):
+	A = []
+	C = []
+	for a in Mapped_Alphabet:
+		if forward:
+			C.append(s[1:] + [a])
+		else:
+			C.append([a] + s[:-1])
+		A.append(a)
+	return A,C
 
 def longest_path(s0,H,W,fb):
 	k = len(s0)
@@ -168,7 +178,7 @@ def longest_path(s0,H,W,fb):
 					P.append((e[0]+p,e[1]+P[i][1]))
 				did_extension = True
 		P = [(len(p[0]),p) for p in P]
-		P.sort(reverse=True)
+		P = sorted(P,key=itemgetter(0),reverse=True)
 		P = [p[1] for p in P if p[0]==P[0][0]]
 		if not did_extension:
 			P = P[:1]

@@ -39,13 +39,23 @@ def add_sequence_file(file_path):
 		n += i
 	db.kmer_ranges.insert({"n0": n0,"n": n,"info": info})
 
-def generator_to_coords(sequence_generator,base_error_prob = 1./2000):
-	p_correct = 1-base_error_prob
-	# THIS EQUATES A/T AND C/G MISMATCHES WITH NEGATIVE MATCHES, AND ALL OTHERS AS NON-MATCHES
-	letters_to_coords = {'A': complex(-1,0)*p_correct,'T': complex(1,0)*p_correct,'C': complex(0,-1)*p_correct,'G': complex(0,1)*p_correct}
+def generator_to_coords(sequence_generator):
 	for s in sequence_generator:
-		coords = [letters_to_coords.get(l,complex(0,0)) for l in s['s']]
+		coords = letters_to_coords(s)
 		yield s['_id'],coords
+
+# THIS EQUATES A/T AND C/G MISMATCHES WITH NEGATIVE MATCHES, AND ALL OTHERS AS NON-MATCHES
+ltc_q = {'A': complex(-1,0),'T': complex(1,0),'C': complex(0,-1),'G': complex(0,1)}
+p_correct = 1-1./2000
+ltc_no_q = {'A': complex(-1,0)*p_correct,'T': complex(1,0)*p_correct,'C': complex(0,-1)*p_correct,'G': complex(0,1)*p_correct}
+def letters_to_coords(S):
+	if 'q' in S:
+		return array([ltc_q.get(l,complex(0,0)) for l in S['s']])*quality_to_prob(S['q'])
+	else:
+		return [ltc_no_q.get(l,complex(0,0)) for l in S['s']]
+
+def quality_to_prob(Q):
+	return array([1-10**(-q/10.) for q in Q])
 
 def collision_probs(num_spokes=28,num_wheels=36,seq_len=35):
 	for i in range(1,6):
@@ -95,15 +105,10 @@ def bin_one_block(start_id,size,Wheels):
 		push_index(D,w)
 	return A[-1]
 
-def generator_to_bins(sequence_generator,Wheels,reverse_compliments=False):
+def coords_to_bins(A,C,Wheels,reverse_compliments=False):
 	num_wheels = Wheels[-1]['w'] + 1
 	num_spokes = Wheels[-1]['s'] + 1
 	pow2 = [2**j for j in range(num_spokes)]
-	C = []
-	A = []
-	for a,c in generator_to_coords(sequence_generator):
-		A.append(a)
-		C.append(c)
 	L = dot(C,transpose([w['p'] for w in Wheels]).conjugate())
 	L -= [w['c'] for w in Wheels]
 	L = int_((sign(L) + 1)/2)
@@ -116,6 +121,16 @@ def generator_to_bins(sequence_generator,Wheels,reverse_compliments=False):
 		return A,B,B2
 	else:
 		return A,B
+
+def generator_to_bins(sequence_generator,Wheels,rc=False,return_terminals=False):
+	C = []
+	A = []
+	for a,c in generator_to_coords(sequence_generator):
+		if return_terminals:
+			a = (a,c[0],c[-1])
+		A.append(a)
+		C.append(c)
+	return coords_to_bins(A,C,Wheels,reverse_compliments=rc)
 
 def one_wheel(w,spokes,dims,realm=None):
 	if realm:
