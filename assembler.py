@@ -14,7 +14,7 @@ conn = Connection()
 # choose spokes based on memory requirements
 # >>> W = get_wheels('/mnt/test_Wheels.txt',spoke_limit=30)
 # >>> H = hash_test_kmers(W)
-# >>> PR = read_many_sequences(H,W,31)
+# >>> PR = read_many_sequences(H,W,31,3)
 
 def generate_test_genome(n=10000,read_size=50,repeats=10,k=20):
 	L = {0: 'A',1: 'T',2: 'C',3: 'G'}
@@ -46,10 +46,10 @@ def generate_test_genome(n=10000,read_size=50,repeats=10,k=20):
 				l += 1
 	return S
 
-def do_wheels(s):
+def do_wheels(s,w=1):
 	db = conn['test_genome']
 	d = len(db.kmers.find_one()['s'])
-	set_wheels(d,realm='test_genome',spokes=s,wheels=1,out_path='/mnt/test_')
+	set_wheels(d,realm='test_genome',spokes=s,wheels=w,out_path='/mnt/test_')
 	W = get_wheels('/mnt/test_Wheels.txt')
 	return W
 
@@ -58,8 +58,9 @@ def hash_test_kmers(W):
 	docs = db.kmers.find({},timeout=False)
 	A,B = generator_to_bins(docs,W,return_terminals=True)
 	H = defaultdict()
-	for i in xrange(len(A)):
-		H[B[0][i]] = True
+	for j in range(len(B)):
+		for i in xrange(len(A)):
+			H[B[j][i]] = True
 	return H
 
 def update_known_paths(Hp,Pb,pl,forward=True):
@@ -145,6 +146,15 @@ def extend_path(s0,H,W,fb):
 	for a in range(len(A)):
 		if H.get(B[0][a],False):
 			E.append(([A[a]],(B[0][a],)))
+		# POSSIBLE TO USE MULTIPLE WHEELS HERE
+		#extension_bins = ()
+		#for b in range(len(B)):
+		#	if H.get(B[b][a],False):
+		#		extension_bins += (B[b][a],)
+		#	else:
+		#		break
+		#if len(extension_bins) == len(B):
+		#	E.append(([A[a]],(extension_bins,)))
 	return E
 
 Alphabet = {'s': 'ATCG'}
