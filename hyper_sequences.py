@@ -135,29 +135,22 @@ def generator_to_bins(sequence_generator,Wheels,rc=False,return_terminals=False)
 def one_wheel(w,spokes,dims,realm=None):
 	if realm:
 		db = conn[realm]
-		skip_type = True
 	else:
 		db = conn[GENOME]
-		skip_type = False
 	N = db.kmers.count()
 	S = []
 	for s in range(spokes):
-		L = pick_leaf_noloc(dims,db,skip_type,N)
+		L = pick_leaf_noloc(dims,db,N)
 		P = affine_hull(L.values())
 		C = P.pop()
 		S.append((w,s,P,C))
 	return S
 
-def pick_leaf_noloc(nodes,db,st,n0):
-	if st:
-		def rand_seq(n):
-			return db.kmers.find().skip(random.randint(0,n)).limit(1)
-	else:
-		def rand_seq(n):
-			return db.kmers.find({"_id": {'$gt': random.randint(0,n)}}).sort([("_id",ASCENDING)]).limit(1)
+def pick_leaf_noloc(nodes,db,n0):
 	new_leaf = {}
 	while len(new_leaf) < nodes:
-		nl = [_ for _ in generator_to_coords(rand_seq(n0))]
+		docs = db.kmers.find({"_id": {'$gt': random.randint(0,n0)}}).sort([("_id",ASCENDING)]).limit(1)
+		nl = [_ for _ in generator_to_coords(docs)]
 		if nl:
 			new_leaf[len(new_leaf)] = list(nl[0][1])
 	return new_leaf
