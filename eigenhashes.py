@@ -1,10 +1,11 @@
 from numpy import *
 from scipy.sparse.linalg import svd as svds
 from scipy.sparse import csr_matrix
-from read_partitioning import open_count_hash
+from read_partitioning import open_count_hash, membership_generator
 from random import randint
 import math
 from itertools import combinations
+from multiprocessing import Pool
 
 def matrix_from_file_paths(path_list,s):
 	M = []
@@ -16,19 +17,47 @@ def matrix_from_file_paths(path_list,s):
 			M = [H]
 	return M
 
-def condition_matrix(M):
+def condition_matrix(M,block_size=1000000):
 	rows,cols = M.shape
 	log_rows = math.log(rows)
-	for col in xrange(cols):
-		Mc = M[:,col]
-		gf = sum(Mc)
-		if gf > 0:
-			g_weight = 1 + sum([tf/gf*math.log(tf/gf)/log_rows for tf in Mc if tf>0])
-			for row in range(rows):
-				M[row,col] = g_weight*math.log(Mc[row] + 1)
-		if col%(cols/100) == 0:
-			print col
-	return csr_matrix(M)
+	j = 0
+	block = []
+	while j < cols:
+		block.append((j,M[:,j],log_rows))
+		j += 1
+		if len(block) > block_size:
+			pool = Pool()
+			updates = pool.map(pooled_log_entropy,block,max(1,len(block)/10))
+			for c in updates:
+				for r in c:
+					M[r[0],r[1]] = r[2]
+			pool.close()
+			pool.join()
+			updates = None
+			block = []
+			print j
+	if block:
+		pool = Pool()
+		updates = pool.map(pooled_log_entropy,block,max(1,len(block)/10))
+		for c in updates:
+			for r in c:
+				M[r[0],r[1]] = r[2]
+		pool.close()
+		pool.join()
+		updates = None
+		block = []
+	return M
+
+def pooled_log_entropy(args):
+	col_index,col,log_rows = args
+	gf = sum(col)
+	rc_updates = []
+	if gf > 0:
+		g_weight = 1 + sum([tf/gf*math.log(tf/gf)/log_rows for tf in col if tf>0])
+		for row in range(len(col)):
+			if col[row] != 0:
+				rc_updates.append((row,col_index,g_weight*math.log(col[row] + 1)))
+	return rc_updates
 
 def eigenkmers(M,num_dims=10):
 	U,W,Vt = svds(M,num_dims)
@@ -80,4 +109,3 @@ def cluster_centers(C,M,combine_thresh=.98):
 	for c in C:
 		C[c]['members'] = []
 	return C
-	
