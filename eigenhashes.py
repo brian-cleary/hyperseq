@@ -6,6 +6,7 @@ from random import randint
 import math
 from itertools import combinations
 from multiprocessing import Pool
+from scipy.spatial import distance
 
 def matrix_from_file_paths(path_list,s):
 	M = []
@@ -72,40 +73,62 @@ def random_cols(M,n):
 			RC.append(M[:,r])
 	return RC
 
-def kmer_clusters(M,initial_clusters=25,cluster_thresh=0.9,cluster_iters=2):
-	Clusters = {}
+def kmer_clusters(M,initial_clusters=25,cluster_thresh=0.9,cluster_iters=2,block_size=1000):
+	Clusters = []
+	Centers = []
 	for v in random_cols(M,initial_clusters):
-		Clusters[len(Clusters)] = {'center': v,'members': []}
+		Clusters.append([])
+		if len(Centers) > 0:
+			Centers = concatenate((Centers,[v]))
+		else:
+			Centers = [v]
 	num_cols = M.shape[1]
 	for _ in range(cluster_iters):
-		Clusters = cluster_centers(Clusters,M)
+		Clusters,Centers = cluster_centers(Clusters,Centers,M)
+		block = []
 		for i in xrange(num_cols):
 			if abs(sum(M[:,i])) > 0:
-				found_cluster = False
-				for c in Clusters:
-					center = Clusters[c]['center']
-					if cos_sim(M[:,i],center) > cluster_thresh:
-						Clusters[c]['members'].append(i)
-						found_cluster = True
-				if not found_cluster:
-					Clusters[len(Clusters)] = {'center': M[:,i],'members': [i]}
+				block.append(i)
+				if len(block) > block_size:
+					Clusters,Centers = distance_block(block,M,Clusters,Centers,cluster_thresh)
+					block = []
+			if i%1000000 == 0:
+				print _,i,len(Clusters)
+		if len(block) > 0:
+			Clusters,Centers = distance_block(block,M,Clusters,Centers,cluster_thresh)
 	return Clusters
 
-def cos_sim(v1,v2):
-	return dot(v1,v2)/(dot(v1,v1)**.5*dot(v2,v2)**.5)
+def distance_block(indices,M,C,Cm,ct):
+	D = distance.cdist(transpose(M[:,indices]),Cm,'cosine')
+	for i in range(D.shape[0]):
+		found_cluster = False
+		for j in range(D.shape[1]):
+			if D[i,j] < 1-ct:
+				C[j].append(indices[i])
+				found_cluster = True
+		if not found_cluster:
+			C.append([indices[i]])
+			Cm = concatenate((Cm,[M[:,indices[i]]]))
+	return C,Cm
 
-def cluster_centers(C,M,combine_thresh=.98):
-	for k,v in C.items():
-		if len(v['members']) > 0:
-			sampled_members = array(random_cols(M[:,v['members']],min(500,len(v['members']))))
-			C[k]['center'] = sampled_members.sum(axis=0)/len(v['members'])
-	for c in combinations(C.keys(),2):
-		if (c[0] in C) and (c[1] in C):
-			if cos_sim(C[c[0]]['center'],C[c[1]]['center']) > combine_thresh:
-				if len(C[c[0]]['members']) >= len(C[c[1]]['members']):
-					del C[c[1]]
-				else:
-					del C[c[0]]
-	for c in C:
-		C[c]['members'] = []
-	return C
+def cluster_centers(C,Cm,M,combine_thresh=.98):
+	for k in range(len(C)):
+		v = C[k]
+		if len(v) > 0:
+			sampled_members = array(random_cols(M[:,v],min(500,len(v))))
+			Cm[k,:] = sampled_members.sum(axis=0)/len(sampled_members)
+	remove_clusters = {}
+	D = distance.pdist(Cm,'cosine')
+	i = 0
+	j = 1
+	for d in D:
+		if j >= Cm.shape[0]:
+			i += 1
+			j = i+1
+		if d < 1-combine_thresh:
+			if len(C[i]) >= len(C[j]):
+				remove_clusters[j] = True
+			else:
+				remove_clusters[i] = True
+		j += 1
+	return [[] for _ in range(len(C)-len(remove_clusters))],Cm[[i for i in range(len(C)) if i not in remove_clusters],:]
