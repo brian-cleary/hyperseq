@@ -1,7 +1,7 @@
 from numpy import *
 from scipy.sparse.linalg import svd as svds
 from scipy.sparse import csr_matrix
-from read_partitioning import open_count_hash, membership_generator
+from read_partitioning import open_count_hash, membership_generator, bitarray_from_array
 from random import randint
 import math
 from itertools import combinations
@@ -87,11 +87,11 @@ def kmer_clusters(M,initial_clusters=25,cluster_thresh=0.9,cluster_iters=2,block
 		Clusters,Centers = cluster_centers(Clusters,Centers,M)
 		block = []
 		for i in xrange(num_cols):
-			if abs(sum(M[:,i])) > 0:
-				block.append(i)
-				if len(block) > block_size:
-					Clusters,Centers = distance_block(block,M,Clusters,Centers,cluster_thresh)
-					block = []
+			#if abs(sum(M[:,i])) > 0:
+			block.append(i)
+			if len(block) > block_size:
+				Clusters,Centers = distance_block(block,M,Clusters,Centers,cluster_thresh)
+				block = []
 			if i%1000000 == 0:
 				print _,i,len(Clusters)
 		if len(block) > 0:
@@ -111,11 +111,11 @@ def distance_block(indices,M,C,Cm,ct):
 			Cm = concatenate((Cm,[M[:,indices[i]]]))
 	return C,Cm
 
-def cluster_centers(C,Cm,M,combine_thresh=.98):
+def cluster_centers(C,Cm,M,combine_thresh=.9):
 	for k in range(len(C)):
 		v = C[k]
 		if len(v) > 0:
-			sampled_members = array(random_cols(M[:,v],min(500,len(v))))
+			sampled_members = array(random_cols(M[:,v],min(25000,len(v))))
 			Cm[k,:] = sampled_members.sum(axis=0)/len(sampled_members)
 	remove_clusters = {}
 	D = distance.pdist(Cm,'cosine')
@@ -132,3 +132,23 @@ def cluster_centers(C,Cm,M,combine_thresh=.98):
 				remove_clusters[i] = True
 		j += 1
 	return [[] for _ in range(len(C)-len(remove_clusters))],Cm[[i for i in range(len(C)) if i not in remove_clusters],:]
+
+# WILL OPEN TOO MANY FILES AND BREAK WITH LOTS (THOUSANDS) OF CLUSTERS
+def write_reads_from_clusters(read_files,cluster_files,s,out_prefix='/mnt',out_type='.fastq',max_hash=250000000):
+	c = 0
+	while c < len(cluster_files):
+		Cluster_Hashes = []
+		out_files = []
+		i = 0
+		while (i < max_hash) and (c < len(cluster_files)):
+			Cluster_Hashes.append(set(load(cluster_files[c])))
+			out_files.append(open(out_prefix+str(c)+out_type,'w'))
+			c += 1
+			i += len(Cluster_Hashes[-1])
+		for r in read_files:
+			F = open(r,'r')
+			for cluster,read in membership_generator(F,Cluster_Hashes):
+				out_files[cluster].write(read)
+			F.close()
+		for f in out_files:
+			f.close()
