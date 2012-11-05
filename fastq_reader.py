@@ -1,6 +1,6 @@
 from random import randint
 
-def read_generator(file_object,max_reads=10**15,verbose_ids=False,kmer_size=None):
+def read_generator(file_object,max_reads=10**15,verbose_ids=False,from_hashq=False,kmer_size=None):
 	last = None
 	r = 0
 	while (last != file_object.tell()) and (r < max_reads):
@@ -25,6 +25,11 @@ def read_generator(file_object,max_reads=10**15,verbose_ids=False,kmer_size=None
 					if verbose_ids:
 						kmer['_id'] = I
 					yield kmer
+			elif from_hashq:
+				B = file_object.readline()
+				if 'k, bins:' in B:
+					B = [int(c) for c in B[10:-2].split(',')]
+					yield (I,B[0],B[1:])
 			elif (S) and (Q):
 				yield {'_id': I,'s': S,'q': Q}
 			r += 1
