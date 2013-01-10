@@ -118,11 +118,18 @@ def coords_to_bins(A,C,Wheels,reverse_compliments=False):
 		L -= [w['c'] for w in Wheels]
 		L = int_((sign(L) + 1)/2)
 		B2 = [dot(L[:,ws:ws+num_spokes],pow2) for ws in range(0,num_wheels*num_spokes,num_spokes)]
-		return A,B,B2
+		return A,[[pick_one_from_rc_pair(B[i][j],B2[i][j]) for j in range(len(B[i]))] for i in range(len(B))]
 	else:
 		return A,B
 
-def generator_to_bins(sequence_generator,Wheels,rc=False,return_terminals=False):
+# ONLY NEED TO WRITE DOWN ONE KMER FROM REVERSE COMPLIMENT PAIR
+def pick_one_from_rc_pair(b1,b2,mx=1000000):
+	if (b1 % mx) < (b2 % mx):
+		return b1
+	else:
+		return b2
+
+def generator_to_bins(sequence_generator,Wheels,rc=True,return_terminals=False):
 	C = []
 	A = []
 	for a,c in generator_to_coords(sequence_generator):

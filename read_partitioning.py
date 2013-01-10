@@ -6,6 +6,8 @@ from bitarray import bitarray
 import math
 from ctypes import c_uint8
 from collections import defaultdict
+import tempfile
+from multiprocessing import Pool
 
 def set_wheels(f,num_dimensions,spokes=41,wheels=5,out_path='/mnt/'):
 	Wheels = []
@@ -57,7 +59,7 @@ def write_hashed_reads(read_file,out_file,s,w=1,wheel_path='/mnt/Wheels.txt',blo
 			print Exception,str(err)
 		print read_file.tell()
 
-def create_kmer_hash(f,s,w=1,wheel_path='/mnt/Wheels.txt',block_size=10000,out_path='/mnt/Kmer_Hash.txt'):
+def create_kmer_hash(f,s,w=1,wheel_path='/mnt/Wheels.txt',block_size=10000,out_path='/mnt/Kmer_Hash.txt',reverse_compliments=True):
 	W = get_wheels(wheel_path,spoke_limit=s,wheel_limit=w)
 	k = len(W[0]['p'])
 	f.seek(0)
@@ -68,7 +70,7 @@ def create_kmer_hash(f,s,w=1,wheel_path='/mnt/Wheels.txt',block_size=10000,out_p
 	while last != f.tell():
 		last = f.tell()
 		try:
-			A,B = generator_to_bins(read_generator(f,max_reads=block_size,kmer_size=k),W)
+			A,B = generator_to_bins(read_generator(f,max_reads=block_size,kmer_size=k),W,rc=reverse_compliments)
 			for b in range(len(B)):
 				for a in range(len(A)):
 					H[B[b][a]] = True
@@ -80,26 +82,89 @@ def create_kmer_hash(f,s,w=1,wheel_path='/mnt/Wheels.txt',block_size=10000,out_p
 	fo.close()
 	return H
 
-def create_kmer_hash_counts(f,s,w=1,wheel_path='/mnt/Wheels.txt',block_size=10000,out_path='/mnt/Kmer_Hash_Counts.txt'):
+def hash_counts_from_hashq(s,hashq_path,out_path='/mnt/Kmer_Hash_Counts.txt'):
+	H = (c_uint8*2**s)()
+	f = open(hashq_path,'r')
+	last = None
+	while last != f.tell():
+		last = f.tell()
+		for a in hashq_read_generator(f):
+			for b in a[2]:
+				H[b] = min(255,H[b]+1)
+	f.close()
+	f0 = open(out_path,'wb')
+	f0.write(H)
+	f0.close()
+	return H
+
+def create_kmer_hash_counts_fasta(f,s,w=1,wheel_path='/mnt/Wheels.txt',block_size=1,out_path='/mnt/Kmer_Hash_Counts.txt'):
 	W = get_wheels(wheel_path,spoke_limit=s,wheel_limit=w)
 	k = len(W[0]['p'])
-	f.seek(0)
 	H = (c_uint8*2**s)()
 	last = None
+	f.seek(0)
 	while last != f.tell():
 		last = f.tell()
 		try:
 			A,B = generator_to_bins(read_generator(f,max_reads=block_size,kmer_size=k),W)
 			for b in range(len(B)):
 				for a in range(len(A)):
-					# would be great to have overflow checking
 					H[B[b][a]] = min(255,H[B[b][a]]+1)
 		except Exception,err:
 			print str(err)
-		print f.tell()
-	fo = open(out_path,'wb')
-	fo.write(H)
-	fo.close()
+	f0 = open(out_path,'wb')
+	f0.write(H)
+	f0.close()
+	return H
+
+def create_kmer_hash_counts(f,s,w=1,wheel_path='/mnt/Wheels.txt',out_path='/mnt/Kmer_Hash_Counts.txt',temp_file_size=5*10**5):
+	W = get_wheels(wheel_path,spoke_limit=s,wheel_limit=w)
+	kmer_size = len(W[0]['p'])
+	H = (c_uint8*2**s)()
+	block = []
+	last = None
+	f.seek(0)
+	while last != f.tell():
+		last = f.tell()
+		f0 = []
+		f0 += f.readlines(temp_file_size)
+		f0 += read_until_new(f)
+		block.append((f0,kmer_size,W))
+		if len(block) > 500:
+			pool = Pool()
+			results = pool.map(hash_count_part,block,max(1,len(block)/8))
+			for result in results:
+				for k,v in result.items():
+					# would be great to have overflow checking
+					H[k] = min(255,H[k]+v)
+			pool.close()
+			pool.join()
+			block = []
+	if block:
+		pool = Pool()
+		results = pool.map(hash_count_part,block,max(1,len(block)/8))
+		for result in results:
+			for k,v in result.items():
+				# would be great to have overflow checking
+				H[k] = min(255,H[k]+v)
+		pool.close()
+		pool.join()
+		block = []
+	f0 = open(out_path,'wb')
+	f0.write(H)
+	f0.close()
+	return H
+	
+def hash_count_part(args):
+	read_lines,k,W = args
+	H = defaultdict(int)
+	try:
+		A,B = generator_to_bins(reads_from_string(read_lines,kmersize=k),W,rc=True)
+		for b in range(len(B)):
+			for a in range(len(A)):
+				H[B[b][a]] += 1
+	except Exception,err:
+		print str(err)
 	return H
 
 def open_count_hash(file_path,s):
@@ -109,19 +174,17 @@ def open_count_hash(file_path,s):
 	f.close()
 	return H
 
-# DUMB: match_thresh SHOULD PROBABLY BE DETERMINED FROM READS
-def membership_generator(f,H,wheel_path='/mnt/Wheels.txt',block_size=10000,match_thresh=35):
-	s = int(math.log(len(H[0]),2))
-	W = get_wheels(wheel_path,spoke_limit=s,wheel_limit=1)
+def membership_generator(f,H,GW,block_size=10000,match_thresh=0.75):
 	f.seek(0)
 	last = None
 	while last != f.tell():
 		last = f.tell()
 		try:
 			for a in read_generator(f,max_reads=block_size,verbose_ids=True,from_hashq=True):
-				read_set = set(a[2])
-				for h in range(len(H)):
-					if len(read_set & H[h]) >= match_thresh:
+				sect_sums = H[:,a[2]].sum(1)
+				read_match_thresh = GW[a[2]].sum()*match_thresh
+				for h in range(H.shape[0]):
+					if sect_sums[h] > read_match_thresh:
 						yield h,a[0]
 		except Exception, err:
 			print str(err)
