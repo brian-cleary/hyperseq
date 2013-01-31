@@ -1,6 +1,7 @@
 import glob,os
 from fastq_reader import read_until_new
 from ctypes import c_uint8
+from collections import defaultdict
 
 def merge_files(bin_path,read_path,out_prefix='/mnt/'):
 	hash_prefix = 'k, bins: '
@@ -19,7 +20,7 @@ def merge_files(bin_path,read_path,out_prefix='/mnt/'):
 					if read_strings[0].strip().split()[0] in Read_Bin_Index:
 						g.writelines(read_strings)
 						# SUPER DUMB: HARDCODE WRITING KMER SIZE
-						g.write(hash_prefix+'[35,'+Read_Bin_Index[read_strings[0].strip().split()[0]]+']\n')
+						g.write(hash_prefix+'[35,'+Read_Bin_Index[read_strings[0].strip().split()[0]][:-1]+']\n')
 			f.close()
 			g.close()
 			print bf,rf
@@ -50,7 +51,7 @@ def merge_into_hash(read_prefix,bin_prefix,s,out_path):
 def index_bin_file(fp):
 	f = open(fp,'r')
 	#last = None
-	Index = {}
+	Index = defaultdict(str)
 	#while last != f.tell():
 	#	last = f.tell()
 	#	line = f.readline().strip().split()
@@ -61,6 +62,6 @@ def index_bin_file(fp):
 	for l in Lines:
 		line = l.strip().split()
 		if line:
-			Index[line[0]] = line[1]
+			Index[line[0]] += line[1]+','
 	Lines = None
 	return Index

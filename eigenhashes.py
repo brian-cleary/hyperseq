@@ -27,11 +27,11 @@ def abundance_to_conditioned_nonzeros(M,out_prefix='/mnt/'):
 	save(out_prefix+'global_nonzero_weights.npy',GWnz)
 	GW = zeros(total_cols,dtype=float32)
 	for i in xrange(len(NZ)):
-		GW[NZ[i]] = GW[i]
+		GW[NZ[i]] = GWnz[i]
 	save(out_prefix+'global_weights.npy',GW)
 	M = log(M + 1)*GWnz
 	save(out_prefix+'conditioned_nonzeros.npy',M)
-	return M
+	return csr_matrix(M)
 
 def nonzero_cols(M):
 	i = 0
@@ -113,23 +113,42 @@ def kmer_clusters(M,initial_clusters=200,cluster_thresh=0.8,cluster_iters=3,bloc
 	num_cols = M.shape[1]
 	for _ in range(cluster_iters):
 		Clusters,Centers = cluster_centers(Clusters,Centers,M)
+		if _ == cluster_iters-1:
+			maxfits = 5
+		else:
+			maxfits = 1
 		i = 0
 		while i < num_cols:
-			Clusters,Centers = distance_block((i,i+block_size),M,Clusters,Centers,cluster_thresh)
+			Clusters,Centers = distance_block((i,i+block_size),M,Clusters,Centers,cluster_thresh,max_cluster_fits=maxfits)
 			i += block_size
 			if i%100000 == 0:
 				print _,i,len(Clusters)
 	return Clusters
 
-def distance_block(indices,M,C,Cm,ct):
+#def distance_block(indices,M,C,Cm,ct):
+#	D = distance.cdist(transpose(M[:,indices[0]:indices[1]]),Cm,'cosine')
+#	D = D < (1 - ct)
+#	indices = range(indices[0],indices[1])
+#	for i in xrange(D.shape[0]):
+#		found_cluster = False
+#		for j in xrange(D.shape[1]):
+#			if D[i,j]:
+#				C[j].append(indices[i])
+#				found_cluster = True
+#		if not found_cluster:
+#			C.append([indices[i]])
+#			Cm = concatenate((Cm,[M[:,indices[i]]]))
+#	return C,Cm
+
+def distance_block(indices,M,C,Cm,ct,max_cluster_fits=1):
 	D = distance.cdist(transpose(M[:,indices[0]:indices[1]]),Cm,'cosine')
-	D = D < (1 - ct)
 	indices = range(indices[0],indices[1])
 	for i in xrange(D.shape[0]):
 		found_cluster = False
-		for j in xrange(D.shape[1]):
-			if D[i,j]:
-				C[j].append(indices[i])
+		MI = D[i,:].argsort()[:max_cluster_fits]
+		for min_i in MI:
+			if D[i,min_i] < 1-ct:
+				C[min_i].append(indices[i])
 				found_cluster = True
 		if not found_cluster:
 			C.append([indices[i]])
@@ -140,7 +159,7 @@ def cluster_centers(C,Cm,M,combine_thresh=.8):
 	for k in range(len(C)):
 		v = C[k]
 		if len(v) > 0:
-			sampled_members = array(random_cols(M[:,v],min(75000,len(v))))
+			sampled_members = array(random_cols(M[:,v],min(150000,len(v))))
 			Cm[k,:] = sampled_members.sum(axis=0)/len(sampled_members)
 	remove_clusters = {}
 	D = distance.pdist(Cm,'cosine')
@@ -159,7 +178,7 @@ def cluster_centers(C,Cm,M,combine_thresh=.8):
 		j += 1
 	return [[] for _ in range(len(C)-len(remove_clusters))],Cm[[i for i in range(len(C)) if i not in remove_clusters],:]
 
-def save_clusters(Clusters,Nonzeros,out_prefix='/mnt/')
+def save_clusters(Clusters,Nonzeros,out_prefix='/mnt/'):
 	for i in range(len(Clusters)):
 		c = [Nonzeros[x] for x in Clusters[i]]
 		save(out_prefix+str(i)+'.npy',c)

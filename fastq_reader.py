@@ -1,4 +1,5 @@
 from random import randint
+import glob,os
 
 def hashq_read_generator(file_object,max_reads=10**15):
 	last = None
@@ -18,7 +19,8 @@ def hashq_read_generator(file_object,max_reads=10**15):
 def fastq_read_generator(file_object,max_reads=10**15,verbose_ids=False,kmer_size=None):
 	r = 0
 	read_strings = read_until_new(file_object)
-	while read_strings != ['']:
+	while (read_strings != ['']) and (r < max_reads):
+		read_strings = read_until_new(file_object)
 		for rx in reads_from_string(read_strings,verboseids=verbose_ids,kmersize=kmer_size):
 			yield rx
 		r += 1
@@ -31,9 +33,10 @@ def reads_from_string(RS,verboseids=False,kmersize=None):
 		if line[0] == '@':
 			# ASSUMING READ PAIRS ARE SPLIT INTO THEIR OWN LINES
 			verbose_id = line
-			I = line.split()[1]
-			I = I[I.index(':')+1:]
+			#I = line.split()[1]
+			#I = I[I.index(':')+1:]
 			#I = line[line.index(':')+1:].strip()
+			I = line.strip()
 			verbose_id += RS[l]
 			l += 1
 			S = verbose_id.split('\n')[-2]
@@ -78,12 +81,29 @@ def kmers_from_read(s,q,k):
 		yield {'_id': i,'s': s[i:i+k],'q': q[i:i+k]}
 		i += 1
 
+def rand_kmers_for_wheel(read_path,k,total_kmers):
+	RP = glob.glob(os.path.join(read_path,'*.fastq'))
+	kmers_per_file = total_kmers/len(RP)
+	g = open(read_path+'random_kmers.fastq','w')
+	for rp in RP:
+		f = open(rp)
+		kf = 0
+		while kf < kmers_per_file:
+			try:
+				g.write(rand_kmer(f,k))
+				kf += 1
+			except Exception,err:
+				print str(err)
+		f.close()
+	g.close()
+
 def rand_kmer(f,k,max_seek=10**9):
 	while True:
 		f.seek(randint(0,max_seek))
-		rs = [_ for _ in read_generator(f,max_reads=1)]
+		rs = [_ for _ in fastq_read_generator(f,max_reads=1,verbose_ids=True)]
 		if len(rs) > 0:
 			if len(rs[0]['s']) > k:
 				break
 	ri = randint(0,len(rs[0]['s'])-k)
-	return {'s': rs[0]['s'][ri:ri+k],'q': rs[0]['q'][ri:ri+k]}
+	rs = rs[0]['_id'].split('\n')
+	return '\n'.join([rs[0],rs[1][ri:ri+k],rs[2],rs[3][ri:ri+k]+'\n'])

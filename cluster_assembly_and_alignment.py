@@ -19,28 +19,32 @@ def fastq_from_mr_output(mr_result_dir,out_prefix='/mnt/'):
 	for f in F.values():
 		f.close()
 
+assembly_suffix = '_velvet'
 def process_cluster(c,readprefix,outprefix):
 	c = str(c)
-	#sort_read_pairs(readprefix+c+'.short.fastq',out_prefix=readprefix)
-	#fragment_long_reads(readprefix+c+'.fa',out_prefix=readprefix,cov=50,frag_length=3000)
-	assemble_cluster(c,readprefix,outprefix)
-	fragment_long_reads(outprefix+c+'_velvet2/contigs.fa',out_prefix=outprefix+c+'_velvet2/',cov=1,frag_length=3000)
+	total_reads = sort_read_pairs(readprefix+c+'.short.fastq',out_prefix=readprefix)
+	assemble_cluster(c,readprefix,outprefix,exp_cov=max(total_reads*100/2000000,20),cov_cutoff=max(total_reads*100/2000000/15,2))
+	fragment_long_reads(outprefix+c+assembly_suffix+'/contigs.fa',out_prefix=outprefix+c+assembly_suffix+'/',cov=1,frag_length=3000)
 	align_assembly(c,outprefix,outprefix)
 
 def cluster_summary_stats(c,read_prefix,post_prefix):
 	c = str(c)
 	Cluster_Stats = {}
 	Cluster_Stats['Reads'] = read_counts(c,read_prefix)
-	Cluster_Stats['Assembly'] = assembly_stats(read_prefix+c+'.fa',post_prefix+c+'_velvet2/contigs.fa')
+	Cluster_Stats['Assembly'] = assembly_stats(read_prefix+c+'.fa',post_prefix+c+assembly_suffix+'/contigs.fa')
 	Cluster_Stats['Alignments'] = top_alignments(post_prefix+c+'_alignments.txt')
 	return Cluster_Stats
 
 def assembly_stats(long_path,contig_path):
 	AS = {}
-	f = open(long_path,'r')
+	try:
+		f = open(long_path,'r')
+		line = f.readline()
+	except:
+		print 'long path not found:',long_path
+		line = ''
 	L = []
 	l = 0
-	line = f.readline()
 	while line != '':
 		if line[0] == '>':
 			if l > 0:
@@ -55,8 +59,12 @@ def assembly_stats(long_path,contig_path):
 	else:
 		AS['pre assembly'] = None
 	L = []
-	f = open(contig_path,'r')
-	line = f.readline()
+	try:
+		f = open(contig_path,'r')
+		line = f.readline()
+	except:
+		print 'contig path not found:',contig_path
+		line = ''
 	while line != '':
 		if line[0] == '>':
 			L.append(int(line.split('_')[3]))
@@ -72,7 +80,6 @@ def read_counts(c,read_prefix):
 	RC = {}
 	RC['pairs (two per pair)'] = read_count(read_prefix+c+'.short.pairs.fastq',startchar='@')
 	RC['singleton'] = read_count(read_prefix+c+'.short.singleton.fastq',startchar='@')
-	RC['long fragments'] = read_count(read_prefix+c+'.fragmented.fa')
 	return RC
 
 def read_count(fp,startchar='>'):
@@ -86,14 +93,25 @@ def read_count(fp,startchar='>'):
 	f.close()
 	return r
 
-def assemble_cluster(c,read_prefix,out_path):
-	os.system('mkdir '+out_path+c+'_velvet2')
-	#os.system('~/src/velvet_1.2.08/velveth '+out_path+c+'_velvet/ 31 -fastq -short '+read_prefix+c+'.short.singleton.fastq -shortPaired '+read_prefix+c+'.short.pairs.fastq -fasta -long '+read_prefix+c+'.fragmented.fa')
-	os.system('~/src/velvet_1.2.08/velveth '+out_path+c+'_velvet2/ 31 -fastq -short '+read_prefix+c+'.short.singleton.fastq -shortPaired '+read_prefix+c+'.short.pairs.fastq')
-	os.system('~/src/velvet_1.2.08/velvetg '+out_path+c+'_velvet2/ -exp_cov 50 -cov_cutoff 15 -min_contig_lgth 1000')
+def read_count_dict(fp,startchar='>'):
+	f = open(fp,'r')
+	R = defaultdict(int)
+	line = f.readline()
+	while line != '':
+		if line[0] == startchar:
+			R[line.split('=')[-1].strip()] += 1
+		line = f.readline()
+	f.close()
+	return R
 
-def align_assembly(c,contig_prefix,out_path):
-	os.system('/mnt2/ncbi-blast-2.2.27+/bin/blastn -query '+contig_prefix+c+'_velvet2/contigs.fragmented.fa -db /mnt2/ncbi-blast-2.2.27+/db/microbial_genomes.fa -task megablast -max_target_seqs 100 -outfmt "7 qseqid qlen sseqid pident length evalue bitscore score" -out '+out_path+c+'_alignments.txt')
+def assemble_cluster(c,read_prefix,out_path,exp_cov=50,cov_cutoff=15):
+	os.system('mkdir '+out_path+c+assembly_suffix)
+	#os.system('~/src/velvet_1.2.08/velveth '+out_path+c+assembly_suffix+'/ 31 -fastq -short '+read_prefix+c+'.short.singleton.fastq -shortPaired '+read_prefix+c+'.short.pairs.fastq -fasta -long '+read_prefix+c+'.fragmented.fa')
+	os.system('~/src/velvet_1.2.08/velveth '+out_path+c+assembly_suffix+'/ 31 -fastq -short '+read_prefix+c+'.short.singleton.fastq -shortPaired '+read_prefix+c+'.short.pairs.fastq')
+	os.system('~/src/velvet_1.2.08/velvetg '+out_path+c+assembly_suffix+'/ -exp_cov '+str(exp_cov)+' -cov_cutoff '+str(cov_cutoff)+' -min_contig_lgth 1000')
+
+def align_assembly(c,contig_prefix,out_path,blastdb='microbial_genomes.fa'):
+	os.system('/mnt2/ncbi-blast-2.2.27+/bin/blastn -query '+contig_prefix+c+assembly_suffix+'/contigs.fragmented.fa -db /mnt2/ncbi-blast-2.2.27+/db/'+blastdb+' -task megablast -max_target_seqs 100 -outfmt "7 qseqid qlen sseqid pident length evalue bitscore score" -out '+out_path+c+'_alignments.txt')
 
 def top_alignments(alignment_path):
 	f = open(alignment_path,'r')
@@ -131,17 +149,19 @@ def sort_read_pairs(read_path,out_prefix='/mnt/'):
 	all_reads = sorted(all_reads,key=itemgetter(0))
 	r = 0
 	while r < len(all_reads):
-		if (len(all_reads)-r > 2) and (all_reads[r][0].strip()[:-1] == all_reads[r+1][0].strip()[:-1]):
+		if (len(all_reads)-r > 2) and (all_reads[r][0].strip().split()[0][:-1] == all_reads[r+1][0].strip().split()[0][:-1]):
 			pair_file.writelines([all_reads[r][0]]+all_reads[r][1])
 			pair_file.writelines([all_reads[r+1][0]]+all_reads[r+1][1])
 			r += 2
 		else:
 			singleton_file.writelines([all_reads[r][0]]+all_reads[r][1])
 			r += 1
+	total_reads = len(all_reads)
 	all_reads = None
 	f.close()
 	pair_file.close()
 	singleton_file.close()
+	return total_reads
 
 def fragment_long_reads(read_path,out_prefix='/mnt/',cov=8,frag_length=3000):
 	f = open(read_path,'r')

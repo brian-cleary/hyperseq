@@ -1,13 +1,10 @@
 from numpy import *
 import random
-from pymongo import ASCENDING,DESCENDING,Connection
 import cPickle
 from operator import itemgetter
 import math
 from index_tools import push_index
-
-conn = Connection()
-GENOME = 'arabidopsis_thaliana'
+from fastq_reader import fastq_read_generator
 
 def add_sequence_file(file_path):
 	# STICK ALL THE 35MERS IN MONGO
@@ -65,10 +62,10 @@ def collision_probs(num_spokes=28,num_wheels=36,seq_len=35):
 		p2 = 1 - (1 - p1)**num_wheels
 		print 'sequences with',i,'mismatch(es); approx. collision prob:',p2
 
-def set_wheels(num_dimensions,realm=None,spokes=41,wheels=200,out_path='/mnt/'):
+def set_wheels(num_dimensions,random_kmer_path='/mnt/random_kmers.fastq',spokes=41,wheels=200,out_path='/mnt/'):
 	Wheels = []
 	for w in xrange(wheels):
-		Wheels += one_wheel(w,spokes,num_dimensions,realm)
+		Wheels += one_wheel(w,spokes,num_dimensions,random_kmer_path)
 	Wheels.sort()
 	f = open(out_path+'Wheels.txt','w')
 	cPickle.dump(Wheels,f)
@@ -139,27 +136,22 @@ def generator_to_bins(sequence_generator,Wheels,rc=True,return_terminals=False):
 		C.append(c)
 	return coords_to_bins(A,C,Wheels,reverse_compliments=rc)
 
-def one_wheel(w,spokes,dims,realm=None):
-	if realm:
-		db = conn[realm]
-	else:
-		db = conn[GENOME]
-	N = db.kmers.count()
+def one_wheel(w,spokes,dims,rp):
 	S = []
+	f = open(rp)
 	for s in range(spokes):
-		L = pick_leaf_noloc(dims,db,N)
+		L = pick_leaf_noloc(dims,f)
 		P = affine_hull(L.values())
 		C = P.pop()
 		S.append((w,s,P,C))
+	f.close()
 	return S
 
-def pick_leaf_noloc(nodes,db,n0):
+def pick_leaf_noloc(nodes,f):
 	new_leaf = {}
-	while len(new_leaf) < nodes:
-		docs = db.kmers.find({"_id": {'$gt': random.randint(0,n0)}}).sort([("_id",ASCENDING)]).limit(1)
-		nl = [_ for _ in generator_to_coords(docs)]
-		if nl:
-			new_leaf[len(new_leaf)] = list(nl[0][1])
+	nl = [_ for _ in generator_to_coords(fastq_read_generator(f,max_reads=nodes))]
+	for nlx in nl:
+		new_leaf[len(new_leaf)] = list(nlx[1])
 	return new_leaf
 
 def affine_hull(linear_system):
